@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<meta name="description" content="FinCore Lite v0.1 - The accounting tool for every African market">
+<meta name="theme-color" content="#0f172a">
+<title>FinCore Lite v0.1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --font-main: 'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono: 'JetBrains Mono','Fira Code',monospace;
+  --radius: 16px; --radius-sm: 10px;
+  --transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+  --shadow: 0 4px 16px rgba(0,0,0,0.15);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.2);
+  --shadow-xl: 0 16px 48px rgba(0,0,0,0.25);
+}
+[data-theme="dark"] {
+  --bg-primary:#0f172a; --bg-secondary:#1e293b; --bg-tertiary:#334155; --bg-elevated:#0b1221;
+  --text-primary:#f1f5f9; --text-secondary:#94a3b8; --text-muted:#64748b;
+  --accent:#10b981; --accent-light:#34d399; --accent-glow:rgba(16,185,129,0.15);
+  --danger:#ef4444; --danger-light:#f87171; --warning:#f59e0b; --warning-light:#fbbf24;
+  --info:#3b82f6; --info-light:#60a5fa; --border:#334155; --border-light:#1e293b;
+  --gradient-start:#0f172a; --gradient-end:#1e1b4b;
+  --card-bg:rgba(30,41,59,0.8); --glass:rgba(15,23,42,0.7);
+  --input-bg:#334155; --hover-bg:rgba(255,255,255,0.05); --chart-grid:rgba(148,163,184,0.1);
+}
+[data-theme="light"] {
+  --bg-primary:#f8fafc; --bg-secondary:#ffffff; --bg-tertiary:#e2e8f0; --bg-elevated:#f1f5f9;
+  --text-primary:#0f172a; --text-secondary:#475569; --text-muted:#94a3b8;
+  --accent:#059669; --accent-light:#10b981; --accent-glow:rgba(5,150,105,0.1);
+  --danger:#dc2626; --danger-light:#ef4444; --warning:#d97706; --warning-light:#f59e0b;
+  --info:#2563eb; --info-light:#3b82f6; --border:#e2e8f0; --border-light:#f1f5f9;
+  --gradient-start:#f8fafc; --gradient-end:#e0e7ff;
+  --card-bg:rgba(255,255,255,0.9); --glass:rgba(255,255,255,0.7);
+  --input-bg:#f1f5f9; --hover-bg:rgba(0,0,0,0.03); --chart-grid:rgba(148,163,184,0.2);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{font-size:16px;scroll-behavior:smooth;-webkit-font-smoothing:antialiased}
+body{font-family:var(--font-main);background:linear-gradient(135deg,var(--gradient-start)0%,var(--gradient-end)100%);background-attachment:fixed;color:var(--text-primary);min-height:100vh;overflow-x:hidden;transition:var(--transition)}
+.zoom-container{transform-origin:top center;transition:transform 0.2s ease;width:100%;max-width:100vw;overflow-x:hidden}
+.particles{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:hidden}
+.particle{position:absolute;width:3px;height:3px;background:var(--accent);border-radius:50%;opacity:0.2;animation:float 25s infinite linear}
+@keyframes float{0%{transform:translateY(100vh)translateX(0);opacity:0}10%{opacity:0.2}90%{opacity:0.2}100%{transform:translateY(-10vh)translateX(80px);opacity:0}}
+.app-container{position:relative;z-index:1;max-width:1440px;margin:0 auto;padding:20px;min-height:100vh}
+.header{display:flex;justify-content:space-between;align-items:center;padding:16px 0;border-bottom:1px solid var(--border);margin-bottom:24px;flex-wrap:wrap;gap:16px}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-icon{width:42px;height:42px;background:linear-gradient(135deg,var(--accent),var(--accent-light));border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:white;box-shadow:0 4px 16px var(--accent-glow)}
+.logo-text{font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text-primary)}
+.logo-text span{color:var(--accent);font-weight:400}
+.header-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.badge{padding:5px 12px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;border:1px solid;white-space:nowrap}
+.badge-live{background:var(--accent-glow);color:var(--accent);border-color:var(--accent)}
+.badge-mvp{background:rgba(245,158,11,0.1);color:var(--warning);border-color:var(--warning)}
+.badge-phase{background:rgba(59,130,246,0.1);color:var(--info);border-color:var(--info)}
+.controls-group{display:flex;gap:6px;align-items:center;background:var(--bg-tertiary);padding:4px;border-radius:10px}
+.control-btn{width:34px;height:34px;border-radius:8px;border:none;background:transparent;color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:var(--transition);font-family:inherit}
+.control-btn:hover{background:var(--hover-bg);color:var(--text-primary)}
+.control-btn.active{background:var(--accent);color:white}
+.zoom-display{font-size:11px;font-weight:600;color:var(--text-secondary);min-width:40px;text-align:center;font-family:var(--font-mono)}
+.nav-tabs{display:flex;gap:4px;background:var(--bg-secondary);padding:6px;border-radius:14px;margin-bottom:24px;overflow-x:auto;scrollbar-width:none;border:1px solid var(--border)}
+.nav-tabs::-webkit-scrollbar{display:none}
+.nav-tab{padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-secondary);transition:var(--transition);white-space:nowrap;border:none;background:transparent;font-family:inherit;display:flex;align-items:center;gap:6px}
+.nav-tab:hover{color:var(--text-primary);background:var(--hover-bg)}
+.nav-tab.active{background:linear-gradient(135deg,var(--accent),var(--accent-light));color:white;font-weight:600;box-shadow:0 4px 16px var(--accent-glow)}
+.section{display:none;animation:fadeIn 0.4s ease}
+.section.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.card{background:var(--card-bg);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px;transition:var(--transition)}
+.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--accent)}
+.card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.card-title{font-size:17px;font-weight:600;color:var(--text-primary)}
+.card-subtitle{font-size:13px;color:var(--text-secondary);margin-top:4px}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px}
+.kpi-card{background:var(--card-bg);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:var(--radius);padding:22px;position:relative;overflow:hidden;transition:var(--transition)}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:3px 3px 0 0}
+.kpi-card.negative::before{background:linear-gradient(90deg,var(--danger),var(--danger-light))}
+.kpi-card.warning::before{background:linear-gradient(90deg,var(--warning),var(--warning-light))}
+.kpi-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
+.kpi-label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
+.kpi-value{font-size:28px;font-weight:700;letter-spacing:-1px;color:var(--text-primary);margin-bottom:8px;font-family:var(--font-mono)}
+.kpi-change{font-size:13px;font-weight:500;display:flex;align-items:center;gap:4px}
+.kpi-change.positive{color:var(--accent)}.kpi-change.negative{color:var(--danger)}.kpi-change.warning{color:var(--warning)}
+.chart-container{background:var(--card-bg);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:var(--radius);padding:24px;margin-bottom:20px}
+.chart-bar{display:flex;align-items:flex-end;gap:6px;height:180px;padding-top:20px;padding-bottom:28px}
+.chart-bar-item{flex:1;background:linear-gradient(to top,var(--accent),rgba(16,185,129,0.2));border-radius:6px 6px 0 0;min-width:20px;position:relative;transition:var(--transition);cursor:pointer}
+.chart-bar-item:hover{filter:brightness(1.3);transform:scaleY(1.02)}
+.chart-bar-item.negative{background:linear-gradient(to top,var(--danger),rgba(239,68,68,0.2))}
+.chart-bar-label{position:absolute;bottom:-24px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--text-muted);white-space:nowrap}
+.chart-bar-value{position:absolute;top:-22px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:600;opacity:0;transition:opacity 0.3s;color:var(--text-primary);background:var(--bg-tertiary);padding:2px 6px;border-radius:4px;white-space:nowrap}
+.chart-bar-item:hover .chart-bar-value{opacity:1}
+.pie-chart-container{display:flex;align-items:center;gap:24px;padding:20px 0;flex-wrap:wrap}
+.pie-chart{width:180px;height:180px;border-radius:50%;background:conic-gradient(var(--accent)0%35%,var(--info)35%55%,var(--warning)55%70%,#8b5cf6 70%82%,var(--danger)82%92%,var(--text-muted)92%100%);position:relative;flex-shrink:0}
+.pie-chart::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:110px;height:110px;background:var(--bg-secondary);border-radius:50%}
+.pie-legend{flex:1;min-width:180px}
+.pie-legend-item{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:13px}
+.pie-legend-dot{width:12px;height:12px;border-radius:3px;flex-shrink:0}
+.pie-legend-text{color:var(--text-secondary)}.pie-legend-pct{color:var(--text-primary);font-weight:600;margin-left:auto}
+.data-table{width:100%;border-collapse:collapse;font-size:13px}
+.data-table th{text-align:left;padding:12px 14px;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);border-bottom:1px solid var(--border);font-weight:600}
+.data-table td{padding:14px;border-bottom:1px solid var(--border-light);color:var(--text-secondary)}
+.data-table tr:last-child td{border-bottom:none}
+.data-table tr:hover td{background:var(--hover-bg)}
+.status-pill{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.status-posted{background:rgba(16,185,129,0.1);color:var(--accent)}
+.status-pending{background:rgba(245,158,11,0.1);color:var(--warning)}
+.status-draft{background:rgba(148,163,184,0.1);color:var(--text-muted)}
+.form-group{margin-bottom:18px}
+.form-label{display:block;font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px}
+.form-input,.form-select,.form-textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:14px;font-family:inherit;transition:var(--transition)}
+.form-input:focus,.form-select:focus,.form-textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:640px){.form-row{grid-template-columns:1fr}.kpi-grid{grid-template-columns:1fr}.chart-bar{height:140px}.pie-chart-container{flex-direction:column;align-items:center}}
+.btn{padding:11px 22px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;transition:var(--transition);border:none;font-family:inherit;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent-light));color:white;box-shadow:0 4px 16px var(--accent-glow)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 6px 24px var(--accent-glow);filter:brightness(1.1)}
+.btn-secondary{background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--hover-bg)}
+.btn-danger{background:rgba(239,68,68,0.1);color:var(--danger);border:1px solid rgba(239,68,68,0.3)}
+.btn-sm{padding:7px 14px;font-size:12px}
+.toggle-group{display:flex;background:var(--bg-tertiary);padding:4px;border-radius:10px;width:fit-content}
+.toggle-btn{padding:7px 16px;border-radius:8px;border:none;background:transparent;color:var(--text-muted);font-size:13px;font-weight:500;cursor:pointer;transition:var(--transition);font-family:inherit}
+.toggle-btn.active{background:var(--accent);color:white;font-weight:600;box-shadow:0 2px 8px var(--accent-glow)}
+.insights-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.insight-card{background:var(--bg-tertiary);border-radius:12px;padding:16px;border-left:3px solid var(--accent);transition:var(--transition)}
+.insight-card:hover{transform:translateX(4px)}
+.insight-card.warning{border-left-color:var(--warning)}.insight-card.danger{border-left-color:var(--danger)}.insight-card.info{border-left-color:var(--info)}
+.insight-label{font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:500}
+.insight-text{font-size:13px;color:var(--text-secondary);line-height:1.5}
+.insight-text strong{color:var(--text-primary)}
+.flow-container{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:16px 0;justify-content:center}
+.flow-step{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:12px;padding:14px 16px;text-align:center;min-width:120px;transition:var(--transition)}
+.flow-step:hover{border-color:var(--accent);transform:translateY(-2px)}
+.flow-step-num{width:26px;height:26px;background:var(--accent);color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin:0 auto 8px}
+.flow-step-title{font-size:12px;font-weight:600;color:var(--text-primary)}
+.flow-step-desc{font-size:10px;color:var(--text-muted);margin-top:3px}
+.flow-arrow{color:var(--accent);font-size:18px;font-weight:700}
+.security-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.security-item{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:12px;padding:18px;display:flex;align-items:flex-start;gap:12px;transition:var(--transition)}
+.security-item:hover{border-color:var(--accent)}
+.security-icon{width:36px;height:36px;background:var(--accent-glow);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.security-text{font-size:12px;color:var(--text-secondary);line-height:1.5}
+.security-text strong{color:var(--text-primary);display:block;margin-bottom:3px;font-size:13px}
+.pitch-section{background:linear-gradient(135deg,var(--accent-glow),rgba(99,102,241,0.08));border:1px solid rgba(16,185,129,0.15);border-radius:20px;padding:32px;margin-bottom:24px}
+.pitch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:20px}
+.pitch-card{background:var(--bg-secondary);border:1px solid var(--border);border-radius:14px;padding:22px;transition:var(--transition)}
+.pitch-card:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.pitch-card h3{color:var(--accent);font-size:15px;margin-bottom:10px}
+.pitch-card p{font-size:13px;color:var(--text-secondary);line-height:1.6}
+.pitch-number{font-size:40px;font-weight:700;color:var(--accent);line-height:1;font-family:var(--font-mono)}
+.pitch-label{font-size:12px;color:var(--text-muted);margin-top:6px}
+.arch-diagram{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin:16px 0}
+.arch-layer{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;position:relative;transition:var(--transition)}
+.arch-layer:hover{border-color:var(--accent)}
+.arch-layer-title{font-size:13px;font-weight:600;color:var(--accent);margin-bottom:8px}
+.arch-layer-items{font-size:11px;color:var(--text-muted);line-height:1.6}
+.code-block{background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:18px;font-family:var(--font-mono);font-size:12px;line-height:1.6;overflow-x:auto;color:#e6edf3}
+.code-keyword{color:#ff7b72}.code-string{color:#a5d6ff}.code-comment{color:#8b949e}.code-function{color:#d2a8ff}.code-type{color:#ffa657}
+.progress-bar{height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden;margin-top:8px}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-light));border-radius:4px;transition:width 0.6s ease}
+.progress-fill.warning{background:linear-gradient(90deg,var(--warning),var(--warning-light))}
+.progress-fill.danger{background:linear-gradient(90deg,var(--danger),var(--danger-light))}
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px;max-width:400px}
+.toast{background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:10px;animation:toastIn 0.3s ease;box-shadow:var(--shadow-xl);font-size:13px}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+.toast.success{border-left:3px solid var(--accent)}.toast.error{border-left:3px solid var(--danger)}.toast.warning{border-left:3px solid var(--warning)}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.active{display:flex}
+.modal{background:var(--bg-secondary);border:1px solid var(--border);border-radius:20px;padding:28px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;animation:modalIn 0.3s ease;box-shadow:var(--shadow-xl)}
+@keyframes modalIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+.pulse{animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+@media(max-width:768px){.header{flex-direction:column;align-items:flex-start}.nav-tabs{padding:4px}.nav-tab{padding:8px 12px;font-size:12px}.app-container{padding:12px}.card{padding:16px}.kpi-value{font-size:22px}.flow-step{min-width:100px;padding:10px}}
+@media print{.nav-tabs,.header-actions,.control-btn{display:none!important}body{background:white!important;color:black!important}.card{border:1px solid #ccc!important;box-shadow:none!important}}
+</style>
+</head>
+<body>
+<div class="particles" id="particles"></div>
+<div class="zoom-container" id="zoomContainer">
+<div class="app-container">
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">FC</div>
+    <div class="logo-text">FinCore <span>Lite</span></div>
+  </div>
+  <div class="header-actions">
+    <span class="badge badge-live">● Live v0.1</span>
+    <span class="badge badge-mvp">Phase 1</span>
+    <span class="badge badge-phase">Investor Ready</span>
+    <div class="controls-group">
+      <button class="control-btn" onclick="zoomOut()" title="Zoom Out">−</button>
+      <span class="zoom-display" id="zoomDisplay">100%</span>
+      <button class="control-btn" onclick="zoomIn()" title="Zoom In">+</button>
+      <button class="control-btn" onclick="resetZoom()" title="Reset Zoom">⌂</button>
+    </div>
+    <div class="controls-group">
+      <button class="control-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle Theme">☀</button>
+    </div>
+  </div>
+</div>
+
+<!-- Navigation -->
+<div class="nav-tabs">
+  <button class="nav-tab active" onclick="showSection('dashboard')">📊 Dashboard</button>
+  <button class="nav-tab" onclick="showSection('transactions')">💰 Transactions</button>
+  <button class="nav-tab" onclick="showSection('mpesa')">📱 M-Pesa</button>
+  <button class="nav-tab" onclick="showSection('reports')">📈 Reports</button>
+  <button class="nav-tab" onclick="showSection('gl')">📚 GL</button>
+  <button class="nav-tab" onclick="showSection('security')">🔒 Security</button>
+  <button class="nav-tab" onclick="showSection('architecture')">🏗️ Architecture</button>
+  <button class="nav-tab" onclick="showSection('investor')">🎯 Investor</button>
+</div>
+
+<!-- DASHBOARD SECTION -->
+<div id="dashboard" class="section active">
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total Revenue (MTD)</div>
+      <div class="kpi-value" id="kpi-revenue">KES 847,320</div>
+      <div class="kpi-change positive"><span>↑</span> 12.4% vs last month</div>
+    </div>
+    <div class="kpi-card negative">
+      <div class="kpi-label">Total Expenses (MTD)</div>
+      <div class="kpi-value" id="kpi-expenses">KES 523,180</div>
+      <div class="kpi-change negative"><span>↓</span> 8.2% vs last month</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Net Profit</div>
+      <div class="kpi-value" id="kpi-profit">KES 324,140</div>
+      <div class="kpi-change positive"><span>↑</span> 38.2% margin</div>
+    </div>
+    <div class="kpi-card warning">
+      <div class="kpi-label">M-Pesa Charges</div>
+      <div class="kpi-value" id="kpi-mpesa">KES 12,450</div>
+      <div class="kpi-change warning"><span>!</span> 1.5% of revenue</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
+    <div class="chart-container">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Cash Flow Trend</div>
+          <div class="card-subtitle">Last 30 days — Money In vs Money Out</div>
+        </div>
+        <div class="toggle-group">
+          <button class="toggle-btn active" onclick="setChartPeriod('30d',this)">30D</button>
+          <button class="toggle-btn" onclick="setChartPeriod('90d',this)">90D</button>
+          <button class="toggle-btn" onclick="setChartPeriod('1y',this)">1Y</button>
+        </div>
+      </div>
+      <div class="chart-bar" id="cashflow-chart"></div>
+    </div>
+    <div class="chart-container">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Expense Breakdown</div>
+          <div class="card-subtitle">This month by category</div>
+        </div>
+      </div>
+      <div class="pie-chart-container">
+        <div class="pie-chart"></div>
+        <div class="pie-legend">
+          <div class="pie-legend-item"><span class="pie-legend-dot" style="background:var(--accent)"></span><span class="pie-legend-text">COGS</span><span class="pie-legend-pct">35%</span></div>
+          <div class="pie-legend-item"><span class="pie-legend-dot" style="background:var(--info)"></span><span class="pie-legend-text">Salaries</span><span class="pie-legend-pct">20%</span></div>
+          <div class="pie-legend-item"><span class="pie-legend-dot" style="background:var(--warning)"></span><span class="pie-legend-text">Rent</span><span class="pie-legend-pct">15%</span></div>
+          <div class="pie-legend-item"><span class="pie-legend-dot" style="background:#8b5cf6"></span><span class="pie-legend-text">Utilities</span><span class="pie-legend-pct">12%</span></div>
+          <div class="pie-legend-item"><span class="pie-legend-dot" style="background:var(--danger)"></span><span class="pie-legend-text">Transport</span><span class="pie-legend-pct">10%</span></div>
+          <div class="pie-legend-item"><span class="pie-legend-dot" style="background:var(--text-muted)"></span><span class="pie-legend-text">Others</span><span class="pie-legend-pct">8%</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🤖 AI Insights</div>
+        <div class="card-subtitle">Auto-generated from your GL data</div>
+      </div>
+      <button class="btn btn-secondary" onclick="refreshInsights()">↻ Refresh</button>
+    </div>
+    <div class="insights-grid" id="insights-container">
+      <div class="insight-card">
+        <div class="insight-label">💡 Spending Alert</div>
+        <div class="insight-text">Your <strong>Transport</strong> expenses are <strong>34% above</strong> your 3-month average. Consider reviewing fuel costs.</div>
+      </div>
+      <div class="insight-card warning">
+        <div class="insight-label">📈 Income Trend</div>
+        <div class="insight-text">Revenue is tracking <strong>12% higher</strong> than last month. Best performing day: <strong>Friday</strong> (avg KES 52,000).</div>
+      </div>
+      <div class="insight-card info">
+        <div class="insight-label">💰 M-Pesa Cost</div>
+        <div class="insight-text">You've paid <strong>KES 12,450</strong> in M-Pesa charges this month. This is <strong>1.5%</strong> of your total revenue.</div>
+      </div>
+      <div class="insight-card danger">
+        <div class="insight-label">⚠️ Cash Flow Warning</div>
+        <div class="insight-text">You've spent more than earned for <strong>2 consecutive days</strong>. Review expenses before the streak continues.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TRANSACTIONS SECTION -->
+<div id="transactions" class="section">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">New Transaction</div>
+        <div class="card-subtitle">Record in under 10 seconds — Simple Mode</div>
+      </div>
+      <div class="toggle-group">
+        <button class="toggle-btn active" id="mode-simple" onclick="setEntryMode('simple')">Simple</button>
+        <button class="toggle-btn" id="mode-accountant" onclick="setEntryMode('accountant')">Accountant</button>
+      </div>
+    </div>
+    <div id="simple-entry-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <select class="form-select" id="tx-type">
+            <option value="in">💰 Money In</option>
+            <option value="out">💸 Money Out</option>
+            <option value="transfer">🔄 Transfer</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Amount</label>
+          <input type="number" class="form-input" id="tx-amount" placeholder="0.00">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Currency</label>
+          <select class="form-select" id="tx-currency">
+            <option value="KES">🇰🇪 KES — Kenyan Shilling</option>
+            <option value="USD">🇺🇸 USD — US Dollar</option>
+            <option value="UGX">🇺🇬 UGX — Ugandan Shilling</option>
+            <option value="TZS">🇹🇿 TZS — Tanzanian Shilling</option>
+            <option value="NGN">🇳🇬 NGN — Nigerian Naira</option>
+            <option value="GHS">🇬🇭 GHS — Ghanaian Cedi</option>
+            <option value="BTC">₿ BTC — Bitcoin</option>
+            <option value="USDT">₮ USDT — Tether</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select class="form-select" id="tx-category">
+            <option value="4000">📦 Sales Revenue</option>
+            <option value="4100">🔧 Service Income</option>
+            <option value="5000">📦 Cost of Goods Sold</option>
+            <option value="5100">👥 Salaries & Wages</option>
+            <option value="5200">🏠 Rent & Rates</option>
+            <option value="5300">⚡ Utilities</option>
+            <option value="5400">📞 Communication</option>
+            <option value="5500">🚗 Transport & Fuel</option>
+            <option value="5700">🏦 Bank Charges</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input type="text" class="form-input" id="tx-desc" placeholder="What was this for?">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Date</label>
+          <input type="date" class="form-input" id="tx-date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Reference</label>
+          <input type="text" class="form-input" id="tx-ref" placeholder="Invoice #, Receipt #">
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:24px">
+        <button class="btn btn-primary" onclick="postTransaction()">✓ Post to GL</button>
+        <button class="btn btn-secondary" onclick="saveDraft()">💾 Save Draft</button>
+        <button class="btn btn-secondary" onclick="scanReceipt()">📷 Scan Receipt</button>
+      </div>
+    </div>
+    <div id="accountant-entry-form" style="display:none">
+      <div style="background:var(--bg-tertiary);border-radius:12px;padding:20px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:16px;color:var(--accent)">Double-Entry Journal</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Debit Account</label>
+            <select class="form-select" id="acc-debit">
+              <option value="1000">Cash / M-Pesa Account (1000)</option>
+              <option value="1100">Accounts Receivable (1100)</option>
+              <option value="1200">Inventory (1200)</option>
+              <option value="1300">Equipment (1300)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Credit Account</label>
+            <select class="form-select" id="acc-credit">
+              <option value="4000">Sales Revenue (4000)</option>
+              <option value="4100">Service Income (4100)</option>
+              <option value="2000">Accounts Payable (2000)</option>
+              <option value="3000">Owner Capital (3000)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Debit Amount</label>
+            <input type="number" class="form-input" id="debit-amount" placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Credit Amount</label>
+            <input type="number" class="form-input" id="credit-amount" placeholder="0.00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Narration</label>
+          <input type="text" class="form-input" id="journal-narration" placeholder="Journal narration...">
+        </div>
+      </div>
+      <div style="display:flex;gap:12px">
+        <button class="btn btn-primary" onclick="postJournal()">✓ Post Journal</button>
+        <button class="btn btn-secondary">+ Add Line</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Recent Transactions</div>
+        <div class="card-subtitle">All entries posted to the General Ledger</div>
+      </div>
+      <button class="btn btn-secondary" onclick="exportData('csv')">📥 Export CSV</button>
+    </div>
+    <table class="data-table" id="tx-table">
+      <thead><tr><th>Date</th><th>Ref</th><th>Description</th><th>Category</th><th>Amount</th><th>Status</th></tr></thead>
+      <tbody id="tx-tbody"></tbody>
+    </table>
+  </div>
+</div>
