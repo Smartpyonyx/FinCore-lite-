@@ -1,9 +1,9 @@
 """FinCore Lite v0.1 - Authentication Router"""
-from fastapi import APIRouter, Depends, HTTPException, status, Request, BackgroundTasks
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
-from datetime import datetime, timezone
+from sqlalchemy import select
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import structlog
 
@@ -16,7 +16,7 @@ from app.core.security import (
 )
 from app.schemas import (
     Token, LoginRequest, MFAVerifyRequest, UserCreate, UserResponse,
-    OrganisationCreate, OrganisationResponse
+    UserPreferenceUpdate
 )
 from app.models import User, Organisation, AuditLog, UserPreference
 
@@ -25,8 +25,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 logger = structlog.get_logger()
 settings = get_settings()
 
-# Rate limiting store (use Redis in production)
+# Rate limiting store (use Redis in production for multi-worker deployments)
 login_attempts = {}
+used_refresh_tokens = set()  # In production, use Redis with TTL
+
 
 def check_rate_limit(ip: str) -> bool:
     """Check if IP is rate limited."""
@@ -37,12 +39,14 @@ def check_rate_limit(ip: str) -> bool:
     login_attempts[ip] = attempts
     return len(attempts) < settings.RATE_LIMIT_LOGIN
 
+
 def record_login_attempt(ip: str):
     """Record a failed login attempt."""
     now = datetime.now(timezone.utc).timestamp()
     if ip not in login_attempts:
         login_attempts[ip] = []
     login_attempts[ip].append(now)
+
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -71,11 +75,13 @@ async def get_current_user(
 
     return user
 
+
 async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
     """Ensure user is active."""
     if current_user.status != "ACTIVE":
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
 
 def require_role(roles: list):
     """Role-based access control dependency."""
@@ -87,6 +93,7 @@ def require_role(roles: list):
             )
         return current_user
     return role_checker
+
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
@@ -100,13 +107,12 @@ async def register(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Create organisation
+    # Create organisation (owner_id will be set after user creation)
     org_slug = user_data.email.split("@")[0].lower().replace(".", "-")
     org = Organisation(
         name=user_data.organisation_name or f"{user_data.full_name}'s Business",
         slug=org_slug,
         functional_currency="KES",
-        owner_id=None,  # Will update after user creation
     )
     db.add(org)
     await db.flush()  # Get org ID
@@ -123,7 +129,7 @@ async def register(
     db.add(user)
     await db.flush()
 
-    # Update org owner
+    # Update org owner (now user exists)
     org.owner_id = user.id
 
     # Create default user preferences
@@ -138,6 +144,7 @@ async def register(
     await create_default_accounts(db, org.id, user.id)
 
     # Audit log
+    client_ip = request.client.host if request.client else "unknown"
     audit = AuditLog(
         organisation_id=org.id,
         user_id=user.id,
@@ -145,7 +152,7 @@ async def register(
         entity_type="User",
         entity_id=user.id,
         after_state={"email": user.email, "role": user.role},
-        ip_address=request.client.host,
+        ip_address=client_ip,
     )
     db.add(audit)
 
@@ -155,6 +162,7 @@ async def register(
     logger.info("user_registered", user_id=str(user.id), email=user.email)
     return user
 
+
 @router.post("/login", response_model=Token)
 async def login(
     request: Request,
@@ -162,7 +170,10 @@ async def login(
     db: AsyncSession = Depends(get_db)
 ):
     """Authenticate user and return tokens."""
-    client_ip = request.client.host
+    client_ip = request.client.host if request.client else "unknown"
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
 
     # Rate limiting
     if not check_rate_limit(client_ip):
@@ -179,15 +190,29 @@ async def login(
         record_login_attempt(client_ip)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # Check if MFA required
-    if user.mfa_enabled and settings.MFA_ENABLED_FOR_OWNER and user.role in ["OWNER", "ACCOUNTANT"]:
+    # Check if MFA required for OWNER
+    if user.mfa_enabled and user.role == "OWNER" and settings.MFA_ENABLED_FOR_OWNER:
         if not login_data.mfa_code:
             # Return temp token for MFA verification
             temp_token = create_access_token(
                 {"sub": str(user.id), "mfa_pending": True},
                 expires_delta=timedelta(minutes=5)
             )
-            return {"access_token": temp_token, "refresh_token": "", "token_type": "bearer", 
+            return {"access_token": temp_token, "refresh_token": "", "token_type": "bearer",
+                    "expires_in": 300, "mfa_required": True}
+
+        if not verify_totp(user.mfa_secret, login_data.mfa_code):
+            record_login_attempt(client_ip)
+            raise HTTPException(status_code=401, detail="Invalid MFA code")
+
+    # Check if MFA required for ACCOUNTANT
+    if user.mfa_enabled and user.role == "ACCOUNTANT" and settings.MFA_ENABLED_FOR_ACCOUNTANT:
+        if not login_data.mfa_code:
+            temp_token = create_access_token(
+                {"sub": str(user.id), "mfa_pending": True},
+                expires_delta=timedelta(minutes=5)
+            )
+            return {"access_token": temp_token, "refresh_token": "", "token_type": "bearer",
                     "expires_in": 300, "mfa_required": True}
 
         if not verify_totp(user.mfa_secret, login_data.mfa_code):
@@ -228,6 +253,7 @@ async def login(
         "mfa_required": False
     }
 
+
 @router.post("/mfa/verify", response_model=Token)
 async def verify_mfa(
     request: Request,
@@ -243,7 +269,7 @@ async def verify_mfa(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_totp(user.mfa_secret, mfa_data.mfa_code):
+    if not user or not user.mfa_secret or not verify_totp(user.mfa_secret, mfa_data.mfa_code):
         raise HTTPException(status_code=401, detail="Invalid MFA code")
 
     access_token = create_access_token({
@@ -261,6 +287,7 @@ async def verify_mfa(
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         "mfa_required": False
     }
+
 
 @router.post("/mfa/setup")
 async def setup_mfa(
@@ -284,6 +311,46 @@ async def setup_mfa(
         "message": "Scan QR code with authenticator app and verify to enable MFA"
     }
 
+
+@router.post("/mfa/enable")
+async def enable_mfa(
+    mfa_code: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Enable MFA after verifying the code."""
+    if not current_user.mfa_secret:
+        raise HTTPException(status_code=400, detail="MFA not set up. Call /mfa/setup first.")
+
+    if not verify_totp(current_user.mfa_secret, mfa_code):
+        raise HTTPException(status_code=401, detail="Invalid MFA code")
+
+    current_user.mfa_enabled = True
+    await db.commit()
+
+    return {"success": True, "message": "MFA enabled successfully"}
+
+
+@router.post("/mfa/disable")
+async def disable_mfa(
+    mfa_code: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Disable MFA after verifying the code."""
+    if not current_user.mfa_enabled:
+        raise HTTPException(status_code=400, detail="MFA not enabled")
+
+    if not verify_totp(current_user.mfa_secret, mfa_code):
+        raise HTTPException(status_code=401, detail="Invalid MFA code")
+
+    current_user.mfa_enabled = False
+    current_user.mfa_secret = None
+    await db.commit()
+
+    return {"success": True, "message": "MFA disabled successfully"}
+
+
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
     refresh_token: str,
@@ -293,6 +360,14 @@ async def refresh_token(
     payload = decode_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    # Check if refresh token has been revoked (using JTI)
+    jti = payload.get("jti")
+    if jti in used_refresh_tokens:
+        raise HTTPException(status_code=401, detail="Refresh token revoked")
+
+    # Mark old refresh token as used
+    used_refresh_tokens.add(jti)
 
     user_id = payload.get("sub")
     result = await db.execute(select(User).where(User.id == user_id, User.status == "ACTIVE"))
@@ -318,14 +393,16 @@ async def refresh_token(
         "mfa_required": False
     }
 
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_active_user)):
     """Get current user profile."""
     return current_user
 
+
 @router.put("/me/preferences")
 async def update_preferences(
-    prefs: dict,
+    prefs: UserPreferenceUpdate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -339,22 +416,17 @@ async def update_preferences(
         user_pref = UserPreference(user_id=current_user.id)
         db.add(user_pref)
 
-    # Update fields
-    if "theme" in prefs:
-        user_pref.theme = prefs["theme"]
-        current_user.theme_preference = prefs["theme"]
-    if "zoom_level" in prefs:
-        user_pref.zoom_level = prefs["zoom_level"]
-        current_user.zoom_level = prefs["zoom_level"]
-    if "sidebar_collapsed" in prefs:
-        user_pref.sidebar_collapsed = prefs["sidebar_collapsed"]
-    if "currency_display" in prefs:
-        user_pref.currency_display = prefs["currency_display"]
-    if "date_format" in prefs:
-        user_pref.date_format = prefs["date_format"]
+    # Update fields from validated Pydantic model
+    update_data = prefs.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if hasattr(user_pref, field):
+            setattr(user_pref, field, value)
+        if hasattr(current_user, field):
+            setattr(current_user, field, value)
 
     await db.commit()
-    return {"success": True, "preferences": prefs}
+    return {"success": True, "preferences": update_data}
+
 
 async def create_default_accounts(db: AsyncSession, org_id: str, user_id: str):
     """Create default chart of accounts for new organisation."""

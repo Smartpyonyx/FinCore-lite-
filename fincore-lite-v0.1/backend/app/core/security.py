@@ -1,15 +1,14 @@
 """FinCore Lite v0.1 - Security Stack"""
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Union
+from typing import Optional
 import uuid
+import base64
+import io
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import pyotp
 import qrcode
-import io
-import base64
-from PIL import Image
 
 from app.core.config import get_settings
 
@@ -89,7 +88,7 @@ def generate_qr_code(uri: str) -> str:
     qr = qrcode.make(uri)
     buffer = io.BytesIO()
     qr.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode()
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 def verify_totp(secret: str, token: str) -> bool:
     """Verify TOTP code."""

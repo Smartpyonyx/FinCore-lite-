@@ -1,12 +1,13 @@
 """FinCore Lite v0.1 - Database Models"""
 from sqlalchemy import (
-    Column, String, Integer, DateTime, Date, Boolean, Numeric, 
+    Column, String, Integer, DateTime, Date, Boolean, Numeric,
     Text, ForeignKey, JSON, ARRAY, UniqueConstraint, Index, event
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
+
 
 # Standard columns mixin for every table
 class StandardColumns:
@@ -17,6 +18,7 @@ class StandardColumns:
     status = Column(String(32), nullable=False, default="ACTIVE")
     version = Column(Integer, nullable=False, default=1)  # Optimistic locking
 
+
 class Organisation(Base, StandardColumns):
     __tablename__ = "organisations"
 
@@ -26,7 +28,7 @@ class Organisation(Base, StandardColumns):
     timezone = Column(String(64), nullable=False, default="Africa/Nairobi")
     fiscal_year_start = Column(String(5), nullable=False, default="01-01")
     plan = Column(String(32), nullable=False, default="LITE")
-    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # Set after user creation
     mpesa_shortcode = Column(String(16))
     mpesa_paybill = Column(String(16))
 
@@ -36,6 +38,7 @@ class Organisation(Base, StandardColumns):
         Index("idx_org_owner", "owner_id"),
         Index("idx_org_status", "status"),
     )
+
 
 class User(Base, StandardColumns):
     __tablename__ = "users"
@@ -50,14 +53,14 @@ class User(Base, StandardColumns):
     mfa_enabled = Column(Boolean, nullable=False, default=False)
     mfa_secret = Column(String(64))
     last_login_at = Column(DateTime(timezone=True))
-    theme_preference = Column(String(16), default="dark")  # dark | light | system
-    zoom_level = Column(Numeric(3, 2), default=1.00)
+    # theme_preference and zoom_level moved to UserPreference to avoid duplication
 
     __table_args__ = (
         Index("idx_user_email", "email"),
         Index("idx_user_org", "organisation_id"),
         Index("idx_user_role", "role"),
     )
+
 
 class CustomRole(Base, StandardColumns):
     __tablename__ = "custom_roles"
@@ -69,6 +72,7 @@ class CustomRole(Base, StandardColumns):
     __table_args__ = (
         UniqueConstraint("organisation_id", "name"),
     )
+
 
 class Account(Base, StandardColumns):
     __tablename__ = "accounts"
@@ -91,6 +95,7 @@ class Account(Base, StandardColumns):
         Index("idx_account_org", "organisation_id"),
         Index("idx_account_type", "account_type"),
     )
+
 
 class JournalEntry(Base, StandardColumns):
     __tablename__ = "journal_entries"
@@ -121,10 +126,10 @@ class JournalEntry(Base, StandardColumns):
         Index("idx_je_type", "journal_type"),
     )
 
-class JournalLine(Base):
+
+class JournalLine(Base, StandardColumns):
     __tablename__ = "journal_lines"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id"), nullable=False)
     journal_entry_id = Column(UUID(as_uuid=True), ForeignKey("journal_entries.id"), nullable=False)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False)
@@ -135,7 +140,6 @@ class JournalLine(Base):
     amount_kes = Column(Numeric(20, 4), nullable=False)
     description = Column(Text)
     tags = Column(ARRAY(String))
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
 
     __table_args__ = (
@@ -144,10 +148,11 @@ class JournalLine(Base):
         Index("idx_jl_org", "organisation_id"),
     )
 
+
 class MpesaTransaction(Base, StandardColumns):
     __tablename__ = "mpesa_transactions"
 
-    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id"), nullable=True)  # Resolved from shortcode
     mpesa_reference = Column(String(32), unique=True, nullable=False)
     transaction_type = Column(String(32), nullable=False)  # TILL|PAYBILL|B2C|B2B|REVERSAL|AIRTIME
     direction = Column(String(8), nullable=False)  # IN|OUT
@@ -170,6 +175,7 @@ class MpesaTransaction(Base, StandardColumns):
         Index("idx_mpesa_date", "transaction_date"),
     )
 
+
 class ExchangeRate(Base):
     __tablename__ = "exchange_rates"
 
@@ -187,11 +193,12 @@ class ExchangeRate(Base):
         Index("idx_rate_lookup", "from_currency", "to_currency", "rate_date"),
     )
 
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id"), nullable=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id"), nullable=True)  # Nullable for system-level events
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     action = Column(String(64), nullable=False)
     entity_type = Column(String(64), nullable=False)
@@ -209,6 +216,7 @@ class AuditLog(Base):
         Index("idx_audit_entity", "entity_type", "entity_id"),
     )
 
+
 class UserPreference(Base, StandardColumns):
     __tablename__ = "user_preferences"
 
@@ -224,6 +232,7 @@ class UserPreference(Base, StandardColumns):
     __table_args__ = (
         Index("idx_pref_user", "user_id"),
     )
+
 
 # Row-level security event listeners
 @event.listens_for(Organisation, "before_insert")

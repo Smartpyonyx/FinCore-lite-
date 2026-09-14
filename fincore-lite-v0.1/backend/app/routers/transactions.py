@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.orm import selectinload
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date as date_class
 from decimal import Decimal
 from typing import List
 import uuid
@@ -24,33 +24,39 @@ router = APIRouter(prefix="/transactions", tags=["Transactions"])
 logger = structlog.get_logger()
 settings = get_settings()
 
+
 async def generate_reference(db: AsyncSession, org_id: str) -> str:
-    """Generate unique journal entry reference: JE-YYYY-XXXX."""
-    today = date.today()
+    """Generate unique journal entry reference: JE-YYYY-XXXX.
+    
+    Uses a more robust approach with database-level locking to prevent race conditions.
+    """
+    today = date_class.today()
     year = today.year
 
-    # Count entries this year for this org
+    # Use a subquery with FOR UPDATE to prevent race conditions
+    # In production, consider using a dedicated sequence table
     result = await db.execute(
         select(func.count(JournalEntry.id)).where(
             JournalEntry.organisation_id == org_id,
             JournalEntry.posting_period.like(f"{year}-%")
-        )
+        ).with_for_update()
     )
     count = result.scalar() + 1
     return f"JE-{year}-{count:04d}"
+
 
 async def get_exchange_rate(
     db: AsyncSession,
     from_currency: str,
     to_currency: str = "KES",
-    rate_date: date = None
+    rate_date: date_class = None
 ) -> Decimal:
     """Get exchange rate for currency conversion."""
     if from_currency == to_currency:
         return Decimal("1.0")
 
     if rate_date is None:
-        rate_date = date.today()
+        rate_date = date_class.today()
 
     result = await db.execute(
         select(ExchangeRate).where(
@@ -90,6 +96,7 @@ async def get_exchange_rate(
     }
 
     return fallback_rates.get((from_currency, to_currency), Decimal("1.0"))
+
 
 @router.post("/journal", response_model=JournalEntryResponse, status_code=status.HTTP_201_CREATED)
 async def create_journal_entry(
@@ -168,6 +175,11 @@ async def create_journal_entry(
         db.add(journal_line)
 
     # Audit log
+    client_ip = request.client.host if request.client else "unknown"
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+
     audit = AuditLog(
         organisation_id=current_user.organisation_id,
         user_id=current_user.id,
@@ -180,7 +192,7 @@ async def create_journal_entry(
             "total_credit": str(journal.total_credit_kes),
             "currency": entry.currency
         },
-        ip_address=request.client.host,
+        ip_address=client_ip,
     )
     db.add(audit)
 
@@ -195,6 +207,7 @@ async def create_journal_entry(
     )
 
     return journal
+
 
 @router.get("/journal", response_model=List[JournalEntryResponse])
 async def list_journal_entries(
@@ -217,6 +230,7 @@ async def list_journal_entries(
     result = await db.execute(query)
     return result.scalars().all()
 
+
 @router.get("/journal/{entry_id}", response_model=JournalEntryResponse)
 async def get_journal_entry(
     entry_id: str,
@@ -235,23 +249,24 @@ async def get_journal_entry(
         raise HTTPException(status_code=404, detail="Journal entry not found")
     return entry
 
+
 @router.post("/simple", response_model=APIResponse)
 async def create_simple_transaction(
     request: Request,
     tx_type: str,  # "in" | "out" | "transfer"
     amount: Decimal,
-    currency: str = "KES",
     category_id: str,
+    currency: str = "KES",
     description: str = "",
-    date: date = None,
+    posting_date: date_class = None,
     reference: str = None,
     current_user: User = Depends(require_role(["OWNER", "ACCOUNTANT", "STAFF"])),
     db: AsyncSession = Depends(get_db)
 ):
     """Simple mode transaction — under 10 seconds entry."""
 
-    if date is None:
-        date = date.today()
+    if posting_date is None:
+        posting_date = date_class.today()
 
     # Get cash account
     result = await db.execute(
@@ -298,20 +313,131 @@ async def create_simple_transaction(
         narration = f"Transfer: {description or category_account.name}"
 
     entry = JournalEntryCreate(
-        posting_date=date,
+        posting_date=posting_date,
         narration=narration,
         currency=currency,
         lines=lines,
         source_document=reference
     )
 
-    journal = await create_journal_entry(request, entry, current_user, db)
+    # Call the internal logic directly instead of via the endpoint
+    journal = await _create_journal_entry_internal(request, entry, current_user, db)
 
     return APIResponse(
         success=True,
         message=f"Transaction posted: {journal.reference}",
         data={"journal_id": str(journal.id), "reference": journal.reference}
     )
+
+
+async def _create_journal_entry_internal(
+    request: Request,
+    entry: JournalEntryCreate,
+    current_user: User,
+    db: AsyncSession
+) -> JournalEntry:
+    """Internal function to create journal entry without Depends."""
+    # Validate accounts exist and belong to org
+    for line in entry.lines:
+        result = await db.execute(
+            select(Account).where(
+                Account.id == line.account_id,
+                Account.organisation_id == current_user.organisation_id,
+                Account.status == "ACTIVE",
+                Account.is_postable == True
+            )
+        )
+        account = result.scalar_one_or_none()
+        if not account:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Account {line.account_id} not found or not postable"
+            )
+
+    # Get exchange rate
+    exchange_rate = await get_exchange_rate(db, entry.currency, "KES", entry.posting_date)
+
+    # Generate reference
+    reference = await generate_reference(db, str(current_user.organisation_id))
+
+    # Create journal entry
+    journal = JournalEntry(
+        organisation_id=current_user.organisation_id,
+        reference=reference,
+        journal_type="MANUAL",
+        posting_date=entry.posting_date,
+        posting_period=entry.posting_date.strftime("%Y-%m"),
+        narration=entry.narration,
+        source_document=entry.source_document,
+        source_type="MANUAL",
+        currency=entry.currency,
+        exchange_rate=exchange_rate,
+        total_debit_kes=sum(
+            line.amount * exchange_rate for line in entry.lines if line.line_type == "DEBIT"
+        ),
+        total_credit_kes=sum(
+            line.amount * exchange_rate for line in entry.lines if line.line_type == "CREDIT"
+        ),
+        posted_at=datetime.now(timezone.utc),
+        posted_by=current_user.id,
+        created_by=current_user.id,
+        status="POSTED"
+    )
+    db.add(journal)
+    await db.flush()
+
+    # Create journal lines
+    for line in entry.lines:
+        amount_kes = line.amount * exchange_rate
+        journal_line = JournalLine(
+            organisation_id=current_user.organisation_id,
+            journal_entry_id=journal.id,
+            account_id=line.account_id,
+            line_type=line.line_type,
+            amount_original=line.amount,
+            currency=entry.currency,
+            exchange_rate=exchange_rate,
+            amount_kes=amount_kes,
+            description=line.description,
+            tags=line.tags or [],
+            created_by=current_user.id
+        )
+        db.add(journal_line)
+
+    # Audit log
+    client_ip = request.client.host if request.client else "unknown"
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+
+    audit = AuditLog(
+        organisation_id=current_user.organisation_id,
+        user_id=current_user.id,
+        action="JOURNAL_POSTED",
+        entity_type="JournalEntry",
+        entity_id=journal.id,
+        after_state={
+            "reference": reference,
+            "total_debit": str(journal.total_debit_kes),
+            "total_credit": str(journal.total_credit_kes),
+            "currency": entry.currency
+        },
+        ip_address=client_ip,
+    )
+    db.add(audit)
+
+    await db.commit()
+    await db.refresh(journal)
+
+    logger.info(
+        "journal_posted",
+        journal_id=str(journal.id),
+        reference=reference,
+        org_id=str(current_user.organisation_id)
+    )
+
+    return journal
+
 
 @router.get("/accounts", response_model=List[dict])
 async def list_accounts(

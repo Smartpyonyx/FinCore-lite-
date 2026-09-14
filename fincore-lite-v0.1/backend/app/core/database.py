@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
+from typing import AsyncGenerator
 
 settings = get_settings()
 
@@ -14,7 +15,6 @@ engine = create_async_engine(
     pool_pre_ping=True,  # Verify connections before use
     pool_recycle=3600,   # Recycle connections after 1 hour
     echo=settings.DEBUG,
-    future=True,
 )
 
 # Session factory
@@ -28,7 +28,7 @@ AsyncSessionLocal = async_sessionmaker(
 
 Base = declarative_base()
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]: 
     """Dependency for FastAPI to get DB sessions."""
     async with AsyncSessionLocal() as session:
         try:
