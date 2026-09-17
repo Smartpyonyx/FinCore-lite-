@@ -12,6 +12,9 @@ import structlog
 from app.core.database import get_db
 from app.core.config import get_settings
 from app.routers.auth import get_current_active_user, require_role
+from app.core.utils import (
+    get_exchange_rate, generate_reference, create_journal_entry, get_client_ip
+)
 from app.schemas import MpesaCallback, MpesaCategoriseRequest, MpesaTransactionResponse, APIResponse
 from app.models import MpesaTransaction, JournalEntry, JournalLine, Account, AuditLog, User, Organisation
 from app.schemas import JournalEntryCreate, JournalLineCreate
@@ -25,7 +28,10 @@ def verify_daraja_signature(payload: str, signature: str) -> bool:
     """Verify M-Pesa Daraja callback HMAC signature."""
     if not settings.MPESA_CONSUMER_SECRET:
         logger.warning("mpesa_signature_verification_skipped", reason="no_consumer_secret_configured")
-        return False  # Fail closed - don't accept callbacks without proper secret
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="M-Pesa consumer secret not configured - webhook cannot be verified"
+        )
 
     expected = hmac.new(
         settings.MPESA_CONSUMER_SECRET.encode(),
@@ -62,172 +68,6 @@ async def _resolve_organisation_from_shortcode(db: AsyncSession, shortcode: str)
     return result.scalar_one_or_none()
 
 
-async def _get_exchange_rate(
-    db: AsyncSession,
-    from_currency: str,
-    to_currency: str = "KES",
-    rate_date=None
-) -> Decimal:
-    """Get exchange rate for currency conversion (local copy to avoid circular import)."""
-    from app.models import ExchangeRate
-    from datetime import date as date_class
-
-    if from_currency == to_currency:
-        return Decimal("1.0")
-
-    if rate_date is None:
-        rate_date = date_class.today()
-
-    result = await db.execute(
-        select(ExchangeRate).where(
-            ExchangeRate.from_currency == from_currency,
-            ExchangeRate.to_currency == to_currency,
-            ExchangeRate.rate_date == rate_date
-        ).order_by(ExchangeRate.created_at.desc())
-    )
-    rate = result.scalar_one_or_none()
-
-    if rate:
-        return rate.rate
-
-    # Fallback: use most recent rate
-    result = await db.execute(
-        select(ExchangeRate).where(
-            ExchangeRate.from_currency == from_currency,
-            ExchangeRate.to_currency == to_currency
-        ).order_by(ExchangeRate.rate_date.desc())
-    )
-    rate = result.scalar_one_or_none()
-
-    if rate:
-        return rate.rate
-
-    # Default fallback rates
-    fallback_rates = {
-        ("USD", "KES"): Decimal("129.50"),
-        ("EUR", "KES"): Decimal("140.20"),
-        ("GBP", "KES"): Decimal("165.80"),
-        ("UGX", "KES"): Decimal("0.035"),
-        ("TZS", "KES"): Decimal("0.052"),
-        ("NGN", "KES"): Decimal("0.082"),
-        ("GHS", "KES"): Decimal("11.20"),
-        ("BTC", "KES"): Decimal("8_450_000.00"),
-        ("USDT", "KES"): Decimal("129.50"),
-    }
-
-    return fallback_rates.get((from_currency, to_currency), Decimal("1.0"))
-
-
-async def _create_mpesa_journal_entry(
-    request: Request,
-    entry: JournalEntryCreate,
-    current_user: User,
-    db: AsyncSession
-) -> JournalEntry:
-    """Create journal entry for M-Pesa transaction (local copy to avoid circular import)."""
-    # Validate accounts exist and belong to org
-    for line in entry.lines:
-        result = await db.execute(
-            select(Account).where(
-                Account.id == line.account_id,
-                Account.organisation_id == current_user.organisation_id,
-                Account.status == "ACTIVE",
-                Account.is_postable == True
-            )
-        )
-        account = result.scalar_one_or_none()
-        if not account:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Account {line.account_id} not found or not postable"
-            )
-
-    # Get exchange rate
-    exchange_rate = await _get_exchange_rate(db, entry.currency, "KES", entry.posting_date)
-
-    # Generate reference
-    from app.routers.transactions import generate_reference
-    reference = await generate_reference(db, str(current_user.organisation_id))
-
-    # Create journal entry
-    journal = JournalEntry(
-        organisation_id=current_user.organisation_id,
-        reference=reference,
-        journal_type="MPESA",
-        posting_date=entry.posting_date,
-        posting_period=entry.posting_date.strftime("%Y-%m"),
-        narration=entry.narration,
-        source_document=entry.source_document,
-        source_type="MPESA",
-        currency=entry.currency,
-        exchange_rate=exchange_rate,
-        total_debit_kes=sum(
-            line.amount * exchange_rate for line in entry.lines if line.line_type == "DEBIT"
-        ),
-        total_credit_kes=sum(
-            line.amount * exchange_rate for line in entry.lines if line.line_type == "CREDIT"
-        ),
-        posted_at=datetime.now(timezone.utc),
-        posted_by=current_user.id,
-        created_by=current_user.id,
-        status="POSTED"
-    )
-    db.add(journal)
-    await db.flush()
-
-    # Create journal lines
-    for line in entry.lines:
-        amount_kes = line.amount * exchange_rate
-        journal_line = JournalLine(
-            organisation_id=current_user.organisation_id,
-            journal_entry_id=journal.id,
-            account_id=line.account_id,
-            line_type=line.line_type,
-            amount_original=line.amount,
-            currency=entry.currency,
-            exchange_rate=exchange_rate,
-            amount_kes=amount_kes,
-            description=line.description,
-            tags=line.tags or [],
-            created_by=current_user.id
-        )
-        db.add(journal_line)
-
-    # Audit log
-    client_ip = request.client.host if request.client else "unknown"
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
-
-    audit = AuditLog(
-        organisation_id=current_user.organisation_id,
-        user_id=current_user.id,
-        action="MPESA_JOURNAL_POSTED",
-        entity_type="JournalEntry",
-        entity_id=journal.id,
-        after_state={
-            "reference": reference,
-            "total_debit": str(journal.total_debit_kes),
-            "total_credit": str(journal.total_credit_kes),
-            "currency": entry.currency
-        },
-        ip_address=client_ip,
-    )
-    db.add(audit)
-
-    await db.commit()
-    await db.refresh(journal)
-
-    logger.info(
-        "mpesa_journal_posted",
-        journal_id=str(journal.id),
-        reference=reference,
-        org_id=str(current_user.organisation_id)
-    )
-
-    return journal
-
-
 @router.post("/callback", status_code=status.HTTP_200_OK)
 async def mpesa_callback(
     request: Request,
@@ -237,10 +77,7 @@ async def mpesa_callback(
 ):
     """Receive M-Pesa Daraja callback — first-class integration."""
 
-    client_ip = request.client.host if request.client else "unknown"
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
+    client_ip = get_client_ip(request)
 
     # Verify IP whitelist
     if not verify_ip_whitelist(client_ip):
@@ -249,9 +86,13 @@ async def mpesa_callback(
 
     # Verify HMAC signature
     body = await request.body()
-    if x_signature and not verify_daraja_signature(body.decode("utf-8"), x_signature):
-        logger.warning("mpesa_callback_rejected_signature", ip=client_ip)
-        raise HTTPException(status_code=403, detail="Invalid signature")
+    if x_signature:
+        if not verify_daraja_signature(body.decode("utf-8"), x_signature):
+            logger.warning("mpesa_callback_rejected_signature", ip=client_ip)
+            raise HTTPException(status_code=403, detail="Invalid signature")
+    else:
+        logger.warning("mpesa_callback_missing_signature", ip=client_ip)
+        raise HTTPException(status_code=403, detail="Missing signature header")
 
     # Duplicate detection
     result = await db.execute(
@@ -393,7 +234,7 @@ async def categorise_mpesa(
 
     # Build journal entry
     amount = mpesa_tx.amount
-    exchange_rate = await _get_exchange_rate(db, "KES", "KES")
+    exchange_rate = await get_exchange_rate(db, "KES", "KES")
 
     if mpesa_tx.direction == "IN":
         lines = [
@@ -416,8 +257,8 @@ async def categorise_mpesa(
         source_document=mpesa_tx.mpesa_reference
     )
 
-    # Post to GL
-    journal = await _create_mpesa_journal_entry(request, entry, current_user, db)
+    # Post to GL using shared utility
+    journal = await create_journal_entry(request, entry, current_user, db, journal_type="MPESA")
 
     # Update M-Pesa record
     mpesa_tx.status = "CATEGORISED"
@@ -456,7 +297,6 @@ async def bulk_categorise(
                 mpesa_transaction_id=mapping["mpesa_id"],
                 category_id=mapping["category_id"]
             )
-            # Call the internal logic directly
             await _categorise_mpesa_internal(request, data, current_user, db)
             processed += 1
         except Exception as e:
@@ -513,7 +353,7 @@ async def _categorise_mpesa_internal(
 
     # Build journal entry
     amount = mpesa_tx.amount
-    exchange_rate = await _get_exchange_rate(db, "KES", "KES")
+    exchange_rate = await get_exchange_rate(db, "KES", "KES")
 
     if mpesa_tx.direction == "IN":
         lines = [
@@ -536,8 +376,8 @@ async def _categorise_mpesa_internal(
         source_document=mpesa_tx.mpesa_reference
     )
 
-    # Post to GL
-    journal = await _create_mpesa_journal_entry(request, entry, current_user, db)
+    # Post to GL using shared utility
+    journal = await create_journal_entry(request, entry, current_user, db, journal_type="MPESA")
 
     # Update M-Pesa record
     mpesa_tx.status = "CATEGORISED"

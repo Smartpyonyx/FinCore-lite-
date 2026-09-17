@@ -176,17 +176,15 @@ class MpesaTransaction(Base, StandardColumns):
     )
 
 
-class ExchangeRate(Base):
+class ExchangeRate(Base, StandardColumns):
     __tablename__ = "exchange_rates"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     from_currency = Column(String(3), nullable=False)
     to_currency = Column(String(3), nullable=False, default="KES")
     rate = Column(Numeric(18, 8), nullable=False)
     rate_date = Column(Date, nullable=False)
     source = Column(String(32), nullable=False)  # CBK|OPEN_EXCHANGE|COINGECKO|MANUAL
     approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("from_currency", "to_currency", "rate_date", "source"),

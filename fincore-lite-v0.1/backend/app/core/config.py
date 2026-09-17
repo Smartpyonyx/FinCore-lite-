@@ -3,6 +3,16 @@ from typing import List
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from functools import lru_cache
+import json
+
+
+def parse_json_list(value: str) -> List[str]:
+    """Parse JSON array string to list."""
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        # Fallback: split by comma
+        return [v.strip() for v in value.split(",") if v.strip()]
 
 
 class Settings(BaseSettings):
